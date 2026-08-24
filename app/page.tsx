@@ -45,6 +45,7 @@ export default function Home() {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
           { urls: 'stun:global.stun.twilio.com:3478' }
         ]
       }
@@ -64,14 +65,19 @@ export default function Home() {
       }
     });
 
+    // Sender side: Handle incoming connection from phone
     peer.on('connection', (conn: any) => {
       connRef.current = conn;
       setRole('sender');
-      setStatus('Device connected! Transferring file...');
+      setStatus('Phone connected! Waiting for handshake...');
 
-      conn.on('open', () => {
-        if (file) {
-          sendFile(file, conn);
+      // Wait for receiver ready signal before sending data to prevent race conditions
+      conn.on('data', (data: any) => {
+        if (data && data.type === 'ready') {
+          setStatus('Transferring file...');
+          if (file) {
+            sendFile(file, conn);
+          }
         }
       });
     });
@@ -97,9 +103,7 @@ export default function Home() {
     }, 1200);
   };
 
-  // Optimized sender chunking with backpressure buffer control for mobile stability
   const sendFile = async (fileObj: File, conn: any) => {
-    setStatus('Sending file...');
     startTimeRef.current = Date.now();
 
     conn.send({
@@ -155,7 +159,9 @@ export default function Home() {
     let incomingFile: { name: string; size: number; mimeType: string; chunks: ArrayBuffer[]; receivedSize: number } | null = null;
 
     conn.on('open', () => {
-      setStatus('Connected! Waiting for file...');
+      setStatus('Connected! Initializing handshake...');
+      // Send ready signal so sender knows data channel is active
+      conn.send({ type: 'ready' });
     });
 
     conn.on('data', (data: any) => {
@@ -355,7 +361,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', textAlign: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignContent: 'center', alignItems: 'center', gap: '8px', textAlign: 'center' }}>
             <p style={{ color: '#888888', fontSize: '13px' }}>&copy; 2026 FileDrop. Powered by Hoberg Digital Agency.</p>
             <p style={{ color: '#000000', fontSize: '13px', fontWeight: 700 }}>Direct Browser-to-Browser P2P Transfer</p>
           </div>
