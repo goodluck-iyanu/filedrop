@@ -37,7 +37,7 @@ export default function Home() {
     const Peer = window.Peer;
     if (!Peer) return;
 
-    // Expanded STUN servers to bypass mobile LTE and Wi-Fi firewalls
+    // Optimized STUN configuration for iOS and mobile carrier firewalls
     const peer = new Peer({
       host: '0.peerjs.com',
       port: 443,
@@ -47,8 +47,6 @@ export default function Home() {
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
           { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' },
           { urls: 'stun:global.stun.twilio.com:3478' }
         ]
       }
@@ -63,13 +61,13 @@ export default function Home() {
         const senderId = hash.split('#peer=')[1];
         if (senderId) {
           setRole('receiver');
-          // Slight delay to ensure DOM and event listeners are fully mounted on mobile
-          setTimeout(() => connectToSender(senderId, peer), 500);
+          // Give iOS Safari 1 second to fully mount DOM before firing connection
+          setTimeout(() => connectToSender(senderId, peer), 1000);
         }
       }
     });
 
-    // Sender side: Handle incoming connection from phone
+    // Sender side: Handle incoming connection from iPhone
     peer.on('connection', (conn: any) => {
       connRef.current = conn;
       setRole('sender');
@@ -84,13 +82,13 @@ export default function Home() {
 
       conn.on('error', (err: any) => {
         console.error('Connection data error:', err);
-        setStatus('Data connection error occurred.');
+        setStatus('Data connection error. Please retry.');
       });
     });
 
     peer.on('error', (err: any) => {
       console.error('PeerJS error:', err);
-      setStatus('Network connection error. Please check your internet.');
+      setStatus('Network connection error. Please refresh.');
     });
   };
 
@@ -159,7 +157,12 @@ export default function Home() {
 
   const connectToSender = (senderId: string, peerInstance: any) => {
     setStatus('Connecting to laptop...');
-    const conn = peerInstance.connect(senderId, { reliable: true });
+    
+    // Explicitly set reliable and binary serialization for iOS compatibility
+    const conn = peerInstance.connect(senderId, { 
+      reliable: true,
+      serialization: 'binary'
+    });
     connRef.current = conn;
 
     let incomingFile: { name: string; size: number; mimeType: string; chunks: ArrayBuffer[]; receivedSize: number } | null = null;
@@ -202,7 +205,7 @@ export default function Home() {
 
     conn.on('error', (err: any) => {
       console.error('Connection error:', err);
-      setStatus('Connection failed. Firewall or NAT traversal blocked.');
+      setStatus('Connection failed. iOS Safari blocked the data channel.');
     });
   };
 
