@@ -37,6 +37,7 @@ export default function Home() {
     const Peer = window.Peer;
     if (!Peer) return;
 
+    // Expanded STUN servers to bypass mobile LTE and Wi-Fi firewalls
     const peer = new Peer({
       host: '0.peerjs.com',
       port: 443,
@@ -46,6 +47,8 @@ export default function Home() {
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
           { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' },
           { urls: 'stun:global.stun.twilio.com:3478' }
         ]
       }
@@ -60,7 +63,8 @@ export default function Home() {
         const senderId = hash.split('#peer=')[1];
         if (senderId) {
           setRole('receiver');
-          connectToSender(senderId, peer);
+          // Slight delay to ensure DOM and event listeners are fully mounted on mobile
+          setTimeout(() => connectToSender(senderId, peer), 500);
         }
       }
     });
@@ -69,22 +73,24 @@ export default function Home() {
     peer.on('connection', (conn: any) => {
       connRef.current = conn;
       setRole('sender');
-      setStatus('Phone connected! Waiting for handshake...');
+      setStatus('Phone connected! Establishing data channel...');
 
-      // Wait for receiver ready signal before sending data to prevent race conditions
-      conn.on('data', (data: any) => {
-        if (data && data.type === 'ready') {
-          setStatus('Transferring file...');
-          if (file) {
-            sendFile(file, conn);
-          }
+      conn.on('open', () => {
+        setStatus('Handshake complete! Sending file...');
+        if (file) {
+          sendFile(file, conn);
         }
+      });
+
+      conn.on('error', (err: any) => {
+        console.error('Connection data error:', err);
+        setStatus('Data connection error occurred.');
       });
     });
 
     peer.on('error', (err: any) => {
       console.error('PeerJS error:', err);
-      setStatus('Connection error. Please refresh and retry.');
+      setStatus('Network connection error. Please check your internet.');
     });
   };
 
@@ -152,16 +158,14 @@ export default function Home() {
   };
 
   const connectToSender = (senderId: string, peerInstance: any) => {
-    setStatus('Connecting to sender...');
-    const conn = peerInstance.connect(senderId);
+    setStatus('Connecting to laptop...');
+    const conn = peerInstance.connect(senderId, { reliable: true });
     connRef.current = conn;
 
     let incomingFile: { name: string; size: number; mimeType: string; chunks: ArrayBuffer[]; receivedSize: number } | null = null;
 
     conn.on('open', () => {
-      setStatus('Connected! Initializing handshake...');
-      // Send ready signal so sender knows data channel is active
-      conn.send({ type: 'ready' });
+      setStatus('Connected to laptop! Waiting for file...');
     });
 
     conn.on('data', (data: any) => {
@@ -198,7 +202,7 @@ export default function Home() {
 
     conn.on('error', (err: any) => {
       console.error('Connection error:', err);
-      setStatus('Connection failed. Make sure the sender page is still open.');
+      setStatus('Connection failed. Firewall or NAT traversal blocked.');
     });
   };
 
@@ -361,7 +365,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', alignContent: 'center', alignItems: 'center', gap: '8px', textAlign: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', textAlign: 'center' }}>
             <p style={{ color: '#888888', fontSize: '13px' }}>&copy; 2026 FileDrop. Powered by Hoberg Digital Agency.</p>
             <p style={{ color: '#000000', fontSize: '13px', fontWeight: 700 }}>Direct Browser-to-Browser P2P Transfer</p>
           </div>
