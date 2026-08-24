@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useRef } from "react";
+import { upload } from '@vercel/blob/client';
 
 export default function Home() {
   const [role, setRole] = useState<'idle' | 'uploading' | 'sender'>('idle');
   const [file, setFile] = useState<File | null>(null);
   const [shareLink, setShareLink] = useState('');
-  const [status, setStatus] = useState('Preparing file...');
   const [errorMsg, setErrorMsg] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -17,35 +17,19 @@ export default function Home() {
 
     setFile(selectedFile);
     setRole('uploading');
-    setStatus('Uploading file to secure cloud bridge...');
     setErrorMsg('');
 
     try {
-      const formData = new FormData();
-      formData.append('reqtype', 'fileupload');
-      formData.append('fileToUpload', selectedFile);
-
-      // Using Catbox API for reliable, CORS-friendly browser file uploads
-      const response = await fetch('https://catbox.moe/user/api.php', {
-        method: 'POST',
-        body: formData,
+      const newBlob = await upload(selectedFile.name, selectedFile, {
+        access: 'public',
+        handleUploadUrl: '/api/upload',
       });
 
-      if (!response.ok) {
-        throw new Error(`Upload failed with status: ${response.status}`);
-      }
-
-      const downloadUrl = await response.text();
-      if (!downloadUrl || !downloadUrl.startsWith('http')) {
-        throw new Error('Invalid download link received from server.');
-      }
-
-      setShareLink(downloadUrl.trim());
+      setShareLink(newBlob.url);
       setRole('sender');
-      setStatus('Ready for phone scan');
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err.message || 'Upload failed. Please try again.');
+      setErrorMsg(err.message || 'Upload failed. Please check Vercel Blob token configuration.');
       setRole('idle');
     }
   };
@@ -55,7 +39,6 @@ export default function Home() {
     setFile(null);
     setShareLink('');
     setErrorMsg('');
-    setStatus('Ready to share');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -92,7 +75,6 @@ export default function Home() {
             <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 'clamp(36px, 5vw, 56px)', marginBottom: '16px', fontWeight: 700 }}>Instant File Transfer</h1>
             <p style={{ color: '#888888', fontSize: '18px', maxWidth: '650px', margin: '0 auto 40px' }}>Transfer files instantly between laptop and iPhone. Secure, fast, and fully compatible with all mobile browsers.</p>
             
-            {/* Error Banner */}
             {errorMsg && (
               <div style={{ maxWidth: '600px', margin: '0 auto 24px', background: '#FFEEEE', border: '1px solid #C8001A', color: '#C8001A', padding: '12px 16px', borderRadius: '6px', fontSize: '14px', fontWeight: 700 }}>
                 {errorMsg}
@@ -103,7 +85,7 @@ export default function Home() {
               <div style={{ maxWidth: '600px', margin: '0 auto', background: '#FFFFFF', padding: '40px 32px', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', textAlign: 'center' }}>
                 <div style={{ fontSize: '40px', marginBottom: '16px' }}>📁</div>
                 <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', color: '#000000', marginBottom: '8px' }}>Send Files Instantly</h3>
-                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Supports documents, videos, and media up to 200MB</p>
+                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Supports documents, videos, and media</p>
                 
                 <input 
                   type="file" 
