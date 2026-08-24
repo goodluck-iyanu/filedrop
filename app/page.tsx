@@ -1,221 +1,53 @@
 'use client';
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 
 export default function Home() {
-  const [role, setRole] = useState<'idle' | 'preparing' | 'sender' | 'receiver'>('idle');
+  const [role, setRole] = useState<'idle' | 'uploading' | 'sender' | 'receiver'>('idle');
   const [file, setFile] = useState<File | null>(null);
-  const [peerId, setPeerId] = useState('');
   const [shareLink, setShareLink] = useState('');
-  const [status, setStatus] = useState('Initializing secure connection...');
-  const [progress, setProgress] = useState(0);
-  const [receivedFileUrl, setReceivedFileUrl] = useState<string | null>(null);
-  const [receivedFileName, setReceivedFileName] = useState('');
-  const [transferSpeed, setTransferSpeed] = useState('');
+  const [status, setStatus] = useState('Preparing file...');
+  const [uploadProgress, setUploadProgress] = useState(0);
 
-  const peerRef = useRef<any>(null);
-  const connRef = useRef<any>(null);
-  const startTimeRef = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
-    script.async = true;
-    script.onload = () => {
-      initPeer();
-    };
-    document.body.appendChild(script);
-
-    return () => {
-      if (peerRef.current) peerRef.current.destroy();
-    };
-  }, []);
-
-  const initPeer = () => {
-    // @ts-ignore
-    const Peer = window.Peer;
-    if (!Peer) return;
-
-    // Optimized STUN configuration for iOS and mobile carrier firewalls
-    const peer = new Peer({
-      host: '0.peerjs.com',
-      port: 443,
-      secure: true,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:global.stun.twilio.com:3478' }
-        ]
-      }
-    });
-    peerRef.current = peer;
-
-    peer.on('open', (id: string) => {
-      setPeerId(id);
-      
-      const hash = window.location.hash;
-      if (hash.includes('#peer=')) {
-        const senderId = hash.split('#peer=')[1];
-        if (senderId) {
-          setRole('receiver');
-          // Give iOS Safari 1 second to fully mount DOM before firing connection
-          setTimeout(() => connectToSender(senderId, peer), 1000);
-        }
-      }
-    });
-
-    // Sender side: Handle incoming connection from iPhone
-    peer.on('connection', (conn: any) => {
-      connRef.current = conn;
-      setRole('sender');
-      setStatus('Phone connected! Establishing data channel...');
-
-      conn.on('open', () => {
-        setStatus('Handshake complete! Sending file...');
-        if (file) {
-          sendFile(file, conn);
-        }
-      });
-
-      conn.on('error', (err: any) => {
-        console.error('Connection data error:', err);
-        setStatus('Data connection error. Please retry.');
-      });
-    });
-
-    peer.on('error', (err: any) => {
-      console.error('PeerJS error:', err);
-      setStatus('Network connection error. Please refresh.');
-    });
-  };
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
 
     setFile(selectedFile);
-    setRole('preparing');
+    setRole('uploading');
+    setStatus('Uploading file to secure temporary storage...');
 
-    setTimeout(() => {
-      const link = `${window.location.origin}${window.location.pathname}#peer=${peerId}`;
-      setShareLink(link);
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+
+      // Uploading to secure temporary storage API (works seamlessly across all networks & iPhones)
+      const response = await fetch('https://file.io', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (!data.success) throw new Error('Upload failed');
+
+      setShareLink(data.link);
       setRole('sender');
       setStatus('Ready for phone scan');
-    }, 1200);
-  };
-
-  const sendFile = async (fileObj: File, conn: any) => {
-    startTimeRef.current = Date.now();
-
-    conn.send({
-      type: 'metadata',
-      name: fileObj.name,
-      size: fileObj.size,
-      mimeType: fileObj.type
-    });
-
-    const CHUNK_SIZE = 16384; 
-    const reader = new FileReader();
-    let offset = 0;
-
-    const sendNextChunk = () => {
-      if (offset >= fileObj.size) {
-        setStatus('Transfer complete!');
-        return;
-      }
-
-      const dataChannel = conn.dataChannel;
-      if (dataChannel && dataChannel.bufferedAmount > 65536) {
-        setTimeout(sendNextChunk, 20);
-        return;
-      }
-
-      const slice = fileObj.slice(offset, offset + CHUNK_SIZE);
-      reader.onload = (e) => {
-        if (!e.target?.result) return;
-        const buffer = e.target.result as ArrayBuffer;
-        conn.send(buffer);
-        offset += buffer.byteLength;
-
-        const percent = Math.round((offset / fileObj.size) * 100);
-        setProgress(percent);
-
-        const elapsed = (Date.now() - startTimeRef.current) / 1000;
-        const speed = (offset / (1024 * 1024)) / (elapsed || 1);
-        setTransferSpeed(`${speed.toFixed(2)} MB/s`);
-
-        sendNextChunk();
-      };
-      reader.readAsArrayBuffer(slice);
-    };
-
-    sendNextChunk();
-  };
-
-  const connectToSender = (senderId: string, peerInstance: any) => {
-    setStatus('Connecting to laptop...');
-    
-    // Explicitly set reliable and binary serialization for iOS compatibility
-    const conn = peerInstance.connect(senderId, { 
-      reliable: true,
-      serialization: 'binary'
-    });
-    connRef.current = conn;
-
-    let incomingFile: { name: string; size: number; mimeType: string; chunks: ArrayBuffer[]; receivedSize: number } | null = null;
-
-    conn.on('open', () => {
-      setStatus('Connected to laptop! Waiting for file...');
-    });
-
-    conn.on('data', (data: any) => {
-      if (data && data.type === 'metadata') {
-        incomingFile = {
-          name: data.name,
-          size: data.size,
-          mimeType: data.mimeType,
-          chunks: [],
-          receivedSize: 0
-        };
-        setStatus(`Receiving ${data.name} (${(data.size / (1024*1024)).toFixed(1)} MB)...`);
-        startTimeRef.current = Date.now();
-      } else if (incomingFile) {
-        incomingFile.chunks.push(data);
-        incomingFile.receivedSize += data.byteLength;
-
-        const percent = Math.round((incomingFile.receivedSize / incomingFile.size) * 100);
-        setProgress(percent);
-
-        const elapsed = (Date.now() - startTimeRef.current) / 1000;
-        const speed = (incomingFile.receivedSize / (1024 * 1024)) / (elapsed || 1);
-        setTransferSpeed(`${speed.toFixed(2)} MB/s`);
-
-        if (incomingFile.receivedSize >= incomingFile.size) {
-          const blob = new Blob(incomingFile.chunks, { type: incomingFile.mimeType });
-          const url = URL.createObjectURL(blob);
-          setReceivedFileUrl(url);
-          setReceivedFileName(incomingFile.name);
-          setStatus('Transfer complete!');
-        }
-      }
-    });
-
-    conn.on('error', (err: any) => {
-      console.error('Connection error:', err);
-      setStatus('Connection failed. iOS Safari blocked the data channel.');
-    });
+    } catch (err) {
+      console.error(err);
+      setStatus('Upload failed. Please try a smaller file or retry.');
+      setRole('idle');
+    }
   };
 
   const resetApp = () => {
     setRole('idle');
     setFile(null);
-    setProgress(0);
-    setReceivedFileUrl(null);
+    setShareLink('');
+    setUploadProgress(0);
     setStatus('Ready to share');
-    window.location.hash = '';
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -249,8 +81,8 @@ export default function Home() {
               <span>Built by <a href="https://hoberg.com.ng/tools/" style={{ fontWeight: 700, color: '#FFFFFF', textDecoration: 'underline' }}>Hoberg Tools</a>. Powered by <a href="https://hoberg.com.ng/" style={{ fontWeight: 700, color: '#FFFFFF', textDecoration: 'underline' }}>Hoberg Digital</a>.</span>
             </div>
             
-            <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 'clamp(36px, 5vw, 56px)', marginBottom: '16px', fontWeight: 700 }}>Peer-to-Peer File Transfer</h1>
-            <p style={{ color: '#888888', fontSize: '18px', maxWidth: '650px', margin: '0 auto 40px' }}>Transfer files instantly between laptop and phone. Zero server storage, direct browser-to-browser P2P speed.</p>
+            <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 'clamp(36px, 5vw, 56px)', marginBottom: '16px', fontWeight: 700 }}>Instant File Transfer</h1>
+            <p style={{ color: '#888888', fontSize: '18px', maxWidth: '650px', margin: '0 auto 40px' }}>Transfer files instantly between laptop and iPhone. Secure, fast, and fully compatible with all mobile browsers.</p>
             
             {role === 'idle' && (
               <div style={{ maxWidth: '600px', margin: '0 auto', background: '#FFFFFF', padding: '40px 32px', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', textAlign: 'center' }}>
@@ -273,18 +105,18 @@ export default function Home() {
               </div>
             )}
 
-            {role === 'preparing' && (
+            {role === 'uploading' && (
               <div style={{ maxWidth: '600px', margin: '0 auto', background: '#FFFFFF', padding: '50px 32px', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', textAlign: 'center', color: '#000000' }}>
                 <div style={{ width: '48px', height: '48px', border: '5px solid rgba(200,0,26,0.2)', borderRadius: '50%', borderTopColor: '#C8001A', animation: 'spin 1s ease-in-out infinite', margin: '0 auto 20px' }} />
-                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', marginBottom: '8px' }}>Generating Secure Link...</h3>
-                <p style={{ color: '#888888', fontSize: '14px' }}>Setting up direct P2P connection channel</p>
+                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', marginBottom: '8px' }}>Uploading to Cloud...</h3>
+                <p style={{ color: '#888888', fontSize: '14px' }}>Generating secure mobile-friendly download link</p>
               </div>
             )}
 
             {role === 'sender' && (
               <div style={{ background: '#FFFFFF', borderRadius: '8px', maxWidth: '650px', margin: '0 auto', padding: '32px', textAlign: 'center', color: '#000000', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}>
                 <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', marginBottom: '8px' }}>Sharing: {file?.name}</h3>
-                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Scan this QR code with your phone camera to download instantly</p>
+                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Scan this QR code with your iPhone camera to download instantly</p>
                 
                 {qrImageUrl && (
                   <div style={{ background: '#F5F5F5', padding: '16px', display: 'inline-block', borderRadius: '8px', marginBottom: '24px' }}>
@@ -292,54 +124,15 @@ export default function Home() {
                   </div>
                 )}
 
-                <div style={{ background: '#F5F5F5', padding: '16px', borderRadius: '6px', marginBottom: '24px' }}>
-                  <div style={{ fontSize: '14px', fontWeight: 700, marginBottom: '4px' }}>Status: {status}</div>
-                  {progress > 0 && (
-                    <>
-                      <div style={{ width: '100%', background: '#E0E0E0', height: '8px', borderRadius: '4px', overflow: 'hidden', margin: '12px 0 8px' }}>
-                        <div style={{ width: `${progress}%`, background: '#C8001A', height: '100%', transition: 'width 0.2s' }} />
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#888888' }}>
-                        <span>{progress}% transferred</span>
-                        <span>{transferSpeed}</span>
-                      </div>
-                    </>
-                  )}
+                <div style={{ margin: '16px 0 24px' }}>
+                  <a href={shareLink} target="_blank" rel="noopener noreferrer" style={{ color: '#C8001A', fontSize: '14px', wordBreak: 'break-all', textDecoration: 'underline' }}>
+                    {shareLink}
+                  </a>
                 </div>
 
                 <button onClick={resetApp} style={{ background: 'transparent', border: '2px solid #000000', color: '#000000', padding: '12px 24px', borderRadius: '6px', fontWeight: 700, cursor: 'pointer' }}>
-                  Cancel / Share Another
+                  Share Another File
                 </button>
-              </div>
-            )}
-
-            {role === 'receiver' && (
-              <div style={{ background: '#FFFFFF', borderRadius: '8px', maxWidth: '650px', margin: '0 auto', padding: '32px', textAlign: 'center', color: '#000000', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}>
-                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', marginBottom: '16px' }}>Incoming File Transfer</h3>
-                
-                <div style={{ background: '#F5F5F5', padding: '20px', borderRadius: '6px', marginBottom: '24px' }}>
-                  <div style={{ fontSize: '15px', fontWeight: 700, marginBottom: '8px' }}>{status}</div>
-                  
-                  {progress > 0 && !receivedFileUrl && (
-                    <>
-                      <div style={{ width: '100%', background: '#E0E0E0', height: '8px', borderRadius: '4px', overflow: 'hidden', margin: '12px 0 8px' }}>
-                        <div style={{ width: `${progress}%`, background: '#C8001A', height: '100%', transition: 'width 0.2s' }} />
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#888888' }}>
-                        <span>{progress}% received</span>
-                        <span>{transferSpeed}</span>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {receivedFileUrl && (
-                  <div>
-                    <a href={receivedFileUrl} download={receivedFileName} style={{ display: 'inline-block', background: '#C8001A', color: '#FFFFFF', padding: '16px 32px', borderRadius: '6px', fontWeight: 700, textDecoration: 'none', fontSize: '16px' }}>
-                      Download {receivedFileName}
-                    </a>
-                  </div>
-                )}
               </div>
             )}
 
@@ -364,13 +157,13 @@ export default function Home() {
               <a href="/" style={{ fontFamily: "'Playfair Display', serif", fontSize: '24px', fontWeight: 700, textDecoration: 'none', color: '#000000', display: 'block', marginBottom: '16px' }}>
                 File<span style={{ color: '#C8001A' }}>Drop</span>
               </a>
-              <p style={{ color: '#888888', fontSize: '15px', maxWidth: '350px' }}>FileDrop is a peer-to-peer transfer utility platform built, maintained, and secured by Hoberg Digital Agency.</p>
+              <p style={{ color: '#888888', fontSize: '15px', maxWidth: '350px' }}>FileDrop is a secure file utility platform built, maintained, and secured by Hoberg Digital Agency.</p>
             </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', textAlign: 'center' }}>
             <p style={{ color: '#888888', fontSize: '13px' }}>&copy; 2026 FileDrop. Powered by Hoberg Digital Agency.</p>
-            <p style={{ color: '#000000', fontSize: '13px', fontWeight: 700 }}>Direct Browser-to-Browser P2P Transfer</p>
+            <p style={{ color: '#000000', fontSize: '13px', fontWeight: 700 }}>Secure Cloud Transfer Bridge</p>
           </div>
         </div>
       </footer>
