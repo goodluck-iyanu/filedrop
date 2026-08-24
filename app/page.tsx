@@ -18,7 +18,6 @@ export default function Home() {
   const startTimeRef = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load PeerJS script dynamically to prevent SSR issues
   useEffect(() => {
     const script = document.createElement('script');
     script.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
@@ -33,16 +32,19 @@ export default function Home() {
     };
   }, []);
 
-  // Initialize PeerJS with public STUN servers for cross-network (Wi-Fi to LTE) traversal
   const initPeer = () => {
     // @ts-ignore
     const Peer = window.Peer;
     if (!Peer) return;
 
     const peer = new Peer({
+      host: '0.peerjs.com',
+      port: 443,
+      secure: true,
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
           { urls: 'stun:global.stun.twilio.com:3478' }
         ]
       }
@@ -95,6 +97,7 @@ export default function Home() {
     }, 1200);
   };
 
+  // Optimized sender chunking with backpressure buffer control for mobile stability
   const sendFile = async (fileObj: File, conn: any) => {
     setStatus('Sending file...');
     startTimeRef.current = Date.now();
@@ -110,32 +113,38 @@ export default function Home() {
     const reader = new FileReader();
     let offset = 0;
 
-    reader.onload = (e) => {
-      if (!e.target?.result) return;
-      const buffer = e.target.result as ArrayBuffer;
-      conn.send(buffer);
-      offset += buffer.byteLength;
-
-      const percent = Math.round((offset / fileObj.size) * 100);
-      setProgress(percent);
-
-      const elapsed = (Date.now() - startTimeRef.current) / 1000;
-      const speed = (offset / (1024 * 1024)) / (elapsed || 1);
-      setTransferSpeed(`${speed.toFixed(2)} MB/s`);
-
-      if (offset < fileObj.size) {
-        readNextChunk();
-      } else {
+    const sendNextChunk = () => {
+      if (offset >= fileObj.size) {
         setStatus('Transfer complete!');
+        return;
       }
-    };
 
-    const readNextChunk = () => {
+      const dataChannel = conn.dataChannel;
+      if (dataChannel && dataChannel.bufferedAmount > 65536) {
+        setTimeout(sendNextChunk, 20);
+        return;
+      }
+
       const slice = fileObj.slice(offset, offset + CHUNK_SIZE);
+      reader.onload = (e) => {
+        if (!e.target?.result) return;
+        const buffer = e.target.result as ArrayBuffer;
+        conn.send(buffer);
+        offset += buffer.byteLength;
+
+        const percent = Math.round((offset / fileObj.size) * 100);
+        setProgress(percent);
+
+        const elapsed = (Date.now() - startTimeRef.current) / 1000;
+        const speed = (offset / (1024 * 1024)) / (elapsed || 1);
+        setTransferSpeed(`${speed.toFixed(2)} MB/s`);
+
+        sendNextChunk();
+      };
       reader.readAsArrayBuffer(slice);
     };
 
-    readNextChunk();
+    sendNextChunk();
   };
 
   const connectToSender = (senderId: string, peerInstance: any) => {
