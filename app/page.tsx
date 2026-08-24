@@ -33,19 +33,25 @@ export default function Home() {
     };
   }, []);
 
-  // Initialize PeerJS
+  // Initialize PeerJS with public STUN servers for cross-network (Wi-Fi to LTE) traversal
   const initPeer = () => {
     // @ts-ignore
     const Peer = window.Peer;
     if (!Peer) return;
 
-    const peer = new Peer();
+    const peer = new Peer({
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:global.stun.twilio.com:3478' }
+        ]
+      }
+    });
     peerRef.current = peer;
 
     peer.on('open', (id: string) => {
       setPeerId(id);
       
-      // Check if opened as receiver via URL hash
       const hash = window.location.hash;
       if (hash.includes('#peer=')) {
         const senderId = hash.split('#peer=')[1];
@@ -56,7 +62,6 @@ export default function Home() {
       }
     });
 
-    // Handle incoming connection (Sender side)
     peer.on('connection', (conn: any) => {
       connRef.current = conn;
       setRole('sender');
@@ -68,17 +73,20 @@ export default function Home() {
         }
       });
     });
+
+    peer.on('error', (err: any) => {
+      console.error('PeerJS error:', err);
+      setStatus('Connection error. Please refresh and retry.');
+    });
   };
 
-  // Sender: Handle file selection & trigger loading state
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
 
     setFile(selectedFile);
-    setRole('preparing'); // Show red loading animation state
+    setRole('preparing');
 
-    // Short timeout to simulate connection handshake setup
     setTimeout(() => {
       const link = `${window.location.origin}${window.location.pathname}#peer=${peerId}`;
       setShareLink(link);
@@ -87,7 +95,6 @@ export default function Home() {
     }, 1200);
   };
 
-  // Sender: Stream file over WebRTC DataChannel
   const sendFile = async (fileObj: File, conn: any) => {
     setStatus('Sending file...');
     startTimeRef.current = Date.now();
@@ -99,7 +106,7 @@ export default function Home() {
       mimeType: fileObj.type
     });
 
-    const CHUNK_SIZE = 16384; // 16KB chunks
+    const CHUNK_SIZE = 16384; 
     const reader = new FileReader();
     let offset = 0;
 
@@ -131,7 +138,6 @@ export default function Home() {
     readNextChunk();
   };
 
-  // Receiver: Connect to sender
   const connectToSender = (senderId: string, peerInstance: any) => {
     setStatus('Connecting to sender...');
     const conn = peerInstance.connect(senderId);
@@ -176,8 +182,8 @@ export default function Home() {
     });
 
     conn.on('error', (err: any) => {
-      console.error(err);
-      setStatus('Connection failed. Please retry.');
+      console.error('Connection error:', err);
+      setStatus('Connection failed. Make sure the sender page is still open.');
     });
   };
 
@@ -224,7 +230,6 @@ export default function Home() {
             <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 'clamp(36px, 5vw, 56px)', marginBottom: '16px', fontWeight: 700 }}>Peer-to-Peer File Transfer</h1>
             <p style={{ color: '#888888', fontSize: '18px', maxWidth: '650px', margin: '0 auto 40px' }}>Transfer files instantly between laptop and phone. Zero server storage, direct browser-to-browser P2P speed.</p>
             
-            {/* IDLE STATE: Explicit Select File Button */}
             {role === 'idle' && (
               <div style={{ maxWidth: '600px', margin: '0 auto', background: '#FFFFFF', padding: '40px 32px', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', textAlign: 'center' }}>
                 <div style={{ fontSize: '40px', marginBottom: '16px' }}>📁</div>
@@ -246,7 +251,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* PREPARING STATE: Red Loading Circle Animation */}
             {role === 'preparing' && (
               <div style={{ maxWidth: '600px', margin: '0 auto', background: '#FFFFFF', padding: '50px 32px', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', textAlign: 'center', color: '#000000' }}>
                 <div style={{ width: '48px', height: '48px', border: '5px solid rgba(200,0,26,0.2)', borderRadius: '50%', borderTopColor: '#C8001A', animation: 'spin 1s ease-in-out infinite', margin: '0 auto 20px' }} />
@@ -255,7 +259,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* SENDER STATE: QR Code & Transfer Status */}
             {role === 'sender' && (
               <div style={{ background: '#FFFFFF', borderRadius: '8px', maxWidth: '650px', margin: '0 auto', padding: '32px', textAlign: 'center', color: '#000000', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}>
                 <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', marginBottom: '8px' }}>Sharing: {file?.name}</h3>
@@ -288,7 +291,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* RECEIVER STATE: Downloading progress & File ready */}
             {role === 'receiver' && (
               <div style={{ background: '#FFFFFF', borderRadius: '8px', maxWidth: '650px', margin: '0 auto', padding: '32px', textAlign: 'center', color: '#000000', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}>
                 <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', marginBottom: '16px' }}>Incoming File Transfer</h3>
