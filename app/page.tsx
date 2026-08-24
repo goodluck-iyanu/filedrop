@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useRef } from "react";
-import { upload } from '@vercel/blob/client';
 
 export default function Home() {
   const [role, setRole] = useState<'idle' | 'uploading' | 'sender'>('idle');
@@ -20,16 +19,28 @@ export default function Home() {
     setErrorMsg('');
 
     try {
-      const newBlob = await upload(selectedFile.name, selectedFile, {
-        access: 'public',
-        handleUploadUrl: '/api/upload',
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+
+      const response = await fetch('https://0x0.st', {
+        method: 'POST',
+        body: formData,
       });
 
-      setShareLink(newBlob.url);
+      if (!response.ok) {
+        throw new Error(`Upload failed with status: ${response.status}`);
+      }
+
+      const downloadUrl = (await response.text()).trim();
+      if (!downloadUrl || !downloadUrl.startsWith('http')) {
+        throw new Error('Invalid download link received.');
+      }
+
+      setShareLink(downloadUrl);
       setRole('sender');
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err.message || 'Upload failed. Please check Vercel Blob token configuration.');
+      setErrorMsg(err.message || 'Upload failed. Please try again.');
       setRole('idle');
     }
   };
@@ -85,7 +96,7 @@ export default function Home() {
               <div style={{ maxWidth: '600px', margin: '0 auto', background: '#FFFFFF', padding: '40px 32px', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', textAlign: 'center' }}>
                 <div style={{ fontSize: '40px', marginBottom: '16px' }}>📁</div>
                 <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', color: '#000000', marginBottom: '8px' }}>Send Files Instantly</h3>
-                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Supports documents, videos, and media</p>
+                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Supports documents, videos, and media up to 512MB</p>
                 
                 <input 
                   type="file" 
