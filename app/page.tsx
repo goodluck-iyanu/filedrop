@@ -21,10 +21,14 @@ export default function Home() {
     setErrorMsg('');
 
     try {
-      // Using transfer.sh for reliable browser-to-cloud file bridging
-      const response = await fetch(`https://transfer.sh/${encodeURIComponent(selectedFile.name)}`, {
-        method: 'PUT',
-        body: selectedFile,
+      const formData = new FormData();
+      formData.append('reqtype', 'fileupload');
+      formData.append('fileToUpload', selectedFile);
+
+      // Using Catbox API for reliable, CORS-friendly browser file uploads
+      const response = await fetch('https://catbox.moe/user/api.php', {
+        method: 'POST',
+        body: formData,
       });
 
       if (!response.ok) {
@@ -41,7 +45,7 @@ export default function Home() {
       setStatus('Ready for phone scan');
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err.message || 'Upload failed. Please try a smaller file.');
+      setErrorMsg(err.message || 'Upload failed. Please try again.');
       setRole('idle');
     }
   };
@@ -99,7 +103,7 @@ export default function Home() {
               <div style={{ maxWidth: '600px', margin: '0 auto', background: '#FFFFFF', padding: '40px 32px', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', textAlign: 'center' }}>
                 <div style={{ fontSize: '40px', marginBottom: '16px' }}>📁</div>
                 <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', color: '#000000', marginBottom: '8px' }}>Send Files Instantly</h3>
-                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Supports documents, videos, and media up to 100MB+</p>
+                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Supports documents, videos, and media up to 200MB</p>
                 
                 <input 
                   type="file" 
@@ -119,7 +123,7 @@ export default function Home() {
             {role === 'uploading' && (
               <div style={{ maxWidth: '600px', margin: '0 auto', background: '#FFFFFF', padding: '50px 32px', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', textAlign: 'center', color: '#000000' }}>
                 <div style={{ width: '48px', height: '48px', border: '5px solid rgba(200,0,26,0.2)', borderRadius: '50%', borderTopColor: '#C8001A', animation: 'spin 1s ease-in-out infinite', margin: '0 auto 20px' }} />
-                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', marginBottom: '8px' }}>Uploading to Cloud Bridge...</h3>
+                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', marginBottom: '8px' }}>Uploading File...</h3>
                 <p style={{ color: '#888888', fontSize: '14px' }}>Generating your mobile QR code</p>
               </div>
             )}
