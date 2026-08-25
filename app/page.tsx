@@ -19,27 +19,34 @@ export default function Home() {
     setErrorMsg('');
 
     try {
+      // Step 1: Get the best available GoFile server (CORS-enabled)
+      const serverRes = await fetch('https://api.gofile.io/servers');
+      if (!serverRes.ok) throw new Error('Could not reach GoFile servers.');
+      const serverData = await serverRes.json();
+      const server: string = serverData?.data?.servers?.[0]?.name;
+      if (!server) throw new Error('No GoFile server available.');
+
+      // Step 2: Upload directly from the browser — GoFile supports CORS
       const formData = new FormData();
       formData.append('file', selectedFile);
 
-      // POST to our server-side proxy – avoids CORS issues with 0x0.st
-      const response = await fetch('/api/upload', {
+      const uploadRes = await fetch(`https://${server}.gofile.io/contents/uploadfile`, {
         method: 'POST',
         body: formData,
       });
 
-      const data = await response.json();
+      if (!uploadRes.ok) throw new Error(`Upload failed (${uploadRes.status})`);
 
-      if (!response.ok) {
-        throw new Error(data.error || `Upload failed (${response.status})`);
+      const uploadData = await uploadRes.json();
+
+      if (uploadData.status !== 'ok') {
+        throw new Error(uploadData.message || 'Upload rejected by GoFile.');
       }
 
-      const downloadUrl: string = data.url;
-      if (!downloadUrl || !downloadUrl.startsWith('http')) {
-        throw new Error('Invalid download link received.');
-      }
+      const downloadPage: string = uploadData?.data?.downloadPage;
+      if (!downloadPage) throw new Error('No download link returned.');
 
-      setShareLink(downloadUrl);
+      setShareLink(downloadPage);
       setRole('sender');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Upload failed. Please try again.';
@@ -77,7 +84,7 @@ export default function Home() {
         </div>
       </nav>
 
-      {/* Main Content Area */}
+      {/* Main Content */}
       <main style={{ flex: '1 0 auto' }}>
         <header style={{ backgroundColor: '#000000', color: '#FFFFFF', padding: '80px 0 100px', textAlign: 'center' }}>
           <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '0 24px' }}>
@@ -100,7 +107,7 @@ export default function Home() {
               <div style={{ maxWidth: '600px', margin: '0 auto', background: '#FFFFFF', padding: '40px 32px', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', textAlign: 'center' }}>
                 <div style={{ fontSize: '40px', marginBottom: '16px' }}>📁</div>
                 <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', color: '#000000', marginBottom: '8px' }}>Send Files Instantly</h3>
-                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Supports documents, videos, and media up to 512MB</p>
+                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Supports documents, videos, and media — no size limit</p>
 
                 <input
                   type="file"
@@ -128,7 +135,7 @@ export default function Home() {
             {role === 'sender' && (
               <div style={{ background: '#FFFFFF', borderRadius: '8px', maxWidth: '650px', margin: '0 auto', padding: '32px', textAlign: 'center', color: '#000000', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}>
                 <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', marginBottom: '8px' }}>Sharing: {file?.name}</h3>
-                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Scan this QR code with your iPhone camera to download instantly</p>
+                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Scan this QR code with your phone camera to download instantly</p>
 
                 {qrImageUrl && (
                   <div style={{ background: '#F5F5F5', padding: '16px', display: 'inline-block', borderRadius: '8px', marginBottom: '24px' }}>
@@ -173,7 +180,6 @@ export default function Home() {
               <p style={{ color: '#888888', fontSize: '15px', maxWidth: '350px' }}>FileDrop is a secure file utility platform built, maintained, and secured by Hoberg Digital Agency.</p>
             </div>
           </div>
-
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', textAlign: 'center' }}>
             <p style={{ color: '#888888', fontSize: '13px' }}>&copy; 2026 FileDrop. Powered by Hoberg Digital Agency.</p>
             <p style={{ color: '#000000', fontSize: '13px', fontWeight: 700 }}>Secure Cloud Transfer Bridge</p>
