@@ -22,25 +22,29 @@ export default function Home() {
       const formData = new FormData();
       formData.append('file', selectedFile);
 
-      const response = await fetch('https://0x0.st', {
+      // POST to our server-side proxy – avoids CORS issues with 0x0.st
+      const response = await fetch('/api/upload', {
         method: 'POST',
         body: formData,
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error(`Upload failed with status: ${response.status}`);
+        throw new Error(data.error || `Upload failed (${response.status})`);
       }
 
-      const downloadUrl = (await response.text()).trim();
+      const downloadUrl: string = data.url;
       if (!downloadUrl || !downloadUrl.startsWith('http')) {
         throw new Error('Invalid download link received.');
       }
 
       setShareLink(downloadUrl);
       setRole('sender');
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Upload failed. Please try again.';
       console.error(err);
-      setErrorMsg(err.message || 'Upload failed. Please try again.');
+      setErrorMsg(message);
       setRole('idle');
     }
   };
@@ -53,13 +57,13 @@ export default function Home() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const qrImageUrl = shareLink 
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(shareLink)}` 
+  const qrImageUrl = shareLink
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(shareLink)}`
     : '';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', fontFamily: "'DM Sans', sans-serif", backgroundColor: '#FFFFFF', color: '#000000', lineHeight: 1.6 }}>
-      
+
       {/* Navigation */}
       <nav style={{ backgroundColor: '#000000', color: '#FFFFFF', padding: '20px 0', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
         <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -77,15 +81,15 @@ export default function Home() {
       <main style={{ flex: '1 0 auto' }}>
         <header style={{ backgroundColor: '#000000', color: '#FFFFFF', padding: '80px 0 100px', textAlign: 'center' }}>
           <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '0 24px' }}>
-            
+
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.05)', padding: '8px 16px', borderRadius: '100px', fontSize: '13px', marginBottom: '24px', border: '1px solid rgba(255,255,255,0.1)' }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="#C8001A"><path d="M12 2L2 22h20L12 2z"/></svg>
               <span>Built by <a href="https://hoberg.com.ng/tools/" style={{ fontWeight: 700, color: '#FFFFFF', textDecoration: 'underline' }}>Hoberg Tools</a>. Powered by <a href="https://hoberg.com.ng/" style={{ fontWeight: 700, color: '#FFFFFF', textDecoration: 'underline' }}>Hoberg Digital</a>.</span>
             </div>
-            
+
             <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 'clamp(36px, 5vw, 56px)', marginBottom: '16px', fontWeight: 700 }}>Instant File Transfer</h1>
             <p style={{ color: '#888888', fontSize: '18px', maxWidth: '650px', margin: '0 auto 40px' }}>Transfer files instantly between laptop and iPhone. Secure, fast, and fully compatible with all mobile browsers.</p>
-            
+
             {errorMsg && (
               <div style={{ maxWidth: '600px', margin: '0 auto 24px', background: '#FFEEEE', border: '1px solid #C8001A', color: '#C8001A', padding: '12px 16px', borderRadius: '6px', fontSize: '14px', fontWeight: 700 }}>
                 {errorMsg}
@@ -97,14 +101,14 @@ export default function Home() {
                 <div style={{ fontSize: '40px', marginBottom: '16px' }}>📁</div>
                 <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', color: '#000000', marginBottom: '8px' }}>Send Files Instantly</h3>
                 <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Supports documents, videos, and media up to 512MB</p>
-                
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  style={{ display: 'none' }} 
-                  onChange={handleFileSelect} 
+
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  style={{ display: 'none' }}
+                  onChange={handleFileSelect}
                 />
-                <button 
+                <button
                   onClick={() => fileInputRef.current?.click()}
                   style={{ background: '#C8001A', color: '#FFFFFF', border: 'none', padding: '16px 32px', borderRadius: '6px', fontSize: '16px', fontWeight: 700, cursor: 'pointer' }}
                 >
@@ -125,9 +129,10 @@ export default function Home() {
               <div style={{ background: '#FFFFFF', borderRadius: '8px', maxWidth: '650px', margin: '0 auto', padding: '32px', textAlign: 'center', color: '#000000', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}>
                 <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', marginBottom: '8px' }}>Sharing: {file?.name}</h3>
                 <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Scan this QR code with your iPhone camera to download instantly</p>
-                
+
                 {qrImageUrl && (
                   <div style={{ background: '#F5F5F5', padding: '16px', display: 'inline-block', borderRadius: '8px', marginBottom: '24px' }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={qrImageUrl} alt="Scan to Download" style={{ width: '220px', height: '220px', display: 'block' }} />
                   </div>
                 )}
@@ -175,10 +180,6 @@ export default function Home() {
           </div>
         </div>
       </footer>
-
-      <style jsx global>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-      `}</style>
     </div>
   );
 }
