@@ -1,72 +1,142 @@
 'use client';
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
+
+type FileStatus = 'pending' | 'uploading' | 'done' | 'error';
+
+interface TrackedFile {
+  file: File;
+  status: FileStatus;
+  error?: string;
+}
 
 export default function Home() {
   const [role, setRole] = useState<'idle' | 'uploading' | 'sender'>('idle');
-  const [file, setFile] = useState<File | null>(null);
+  const [trackedFiles, setTrackedFiles] = useState<TrackedFile[]>([]);
   const [shareLink, setShareLink] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [uploadedCount, setUploadedCount] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (!selectedFile) return;
+  const updateFileStatus = (index: number, status: FileStatus, error?: string) => {
+    setTrackedFiles(prev =>
+      prev.map((f, i) => i === index ? { ...f, status, error } : f)
+    );
+  };
 
-    setFile(selectedFile);
+  const uploadFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+
+    const initial: TrackedFile[] = files.map(f => ({ file: f, status: 'pending' }));
+    setTrackedFiles(initial);
     setRole('uploading');
     setErrorMsg('');
+    setUploadedCount(0);
+    setShareLink('');
 
     try {
-      // Step 1: Get the best available GoFile server (CORS-enabled)
+      // Get best GoFile server once
       const serverRes = await fetch('https://api.gofile.io/servers');
       if (!serverRes.ok) throw new Error('Could not reach GoFile servers.');
       const serverData = await serverRes.json();
       const server: string = serverData?.data?.servers?.[0]?.name;
       if (!server) throw new Error('No GoFile server available.');
 
-      // Step 2: Upload directly from the browser — GoFile supports CORS
-      const formData = new FormData();
-      formData.append('file', selectedFile);
+      let folderId: string | null = null;
+      let folderPage: string | null = null;
 
-      const uploadRes = await fetch(`https://${server}.gofile.io/contents/uploadfile`, {
-        method: 'POST',
-        body: formData,
-      });
+      for (let i = 0; i < files.length; i++) {
+        updateFileStatus(i, 'uploading');
 
-      if (!uploadRes.ok) throw new Error(`Upload failed (${uploadRes.status})`);
+        try {
+          const formData = new FormData();
+          formData.append('file', files[i]);
+          // After first file, append all subsequent to same folder
+          if (folderId) formData.append('folderId', folderId);
 
-      const uploadData = await uploadRes.json();
+          const uploadRes = await fetch(`https://${server}.gofile.io/contents/uploadfile`, {
+            method: 'POST',
+            body: formData,
+          });
 
-      if (uploadData.status !== 'ok') {
-        throw new Error(uploadData.message || 'Upload rejected by GoFile.');
+          if (!uploadRes.ok) throw new Error(`HTTP ${uploadRes.status}`);
+
+          const uploadData = await uploadRes.json();
+          if (uploadData.status !== 'ok') throw new Error(uploadData.message || 'Upload rejected.');
+
+          // Capture folder info from first upload
+          if (!folderId) {
+            folderId = uploadData?.data?.parentFolder;
+            folderPage = uploadData?.data?.downloadPage;
+          }
+
+          updateFileStatus(i, 'done');
+          setUploadedCount(c => c + 1);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Failed';
+          updateFileStatus(i, 'error', msg);
+          setUploadedCount(c => c + 1);
+        }
       }
 
-      const downloadPage: string = uploadData?.data?.downloadPage;
-      if (!downloadPage) throw new Error('No download link returned.');
-
-      setShareLink(downloadPage);
+      if (!folderPage) throw new Error('No download link returned.');
+      setShareLink(folderPage);
       setRole('sender');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Upload failed. Please try again.';
-      console.error(err);
       setErrorMsg(message);
       setRole('idle');
     }
   };
 
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) uploadFiles(files);
+    // reset inputs so same files can be re-selected
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (folderInputRef.current) folderInputRef.current.value = '';
+  };
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) uploadFiles(files);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = () => setIsDragging(false);
+
   const resetApp = () => {
     setRole('idle');
-    setFile(null);
+    setTrackedFiles([]);
     setShareLink('');
     setErrorMsg('');
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    setUploadedCount(0);
   };
 
   const qrImageUrl = shareLink
     ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(shareLink)}`
     : '';
+
+  const totalFiles = trackedFiles.length;
+  const progressPct = totalFiles > 0 ? Math.round((uploadedCount / totalFiles) * 100) : 0;
+
+  const statusIcon = (s: FileStatus) => {
+    if (s === 'done') return <span style={{ color: '#22c55e', fontWeight: 700 }}>✓</span>;
+    if (s === 'error') return <span style={{ color: '#C8001A', fontWeight: 700 }}>✗</span>;
+    if (s === 'uploading') return <span style={{ display: 'inline-block', width: '14px', height: '14px', border: '2px solid rgba(200,0,26,0.2)', borderRadius: '50%', borderTopColor: '#C8001A', animation: 'spin 0.8s linear infinite', verticalAlign: 'middle' }} />;
+    return <span style={{ color: '#888' }}>○</span>;
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', fontFamily: "'DM Sans', sans-serif", backgroundColor: '#FFFFFF', color: '#000000', lineHeight: 1.6 }}>
@@ -95,63 +165,116 @@ export default function Home() {
             </div>
 
             <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 'clamp(36px, 5vw, 56px)', marginBottom: '16px', fontWeight: 700 }}>Instant File Transfer</h1>
-            <p style={{ color: '#888888', fontSize: '18px', maxWidth: '650px', margin: '0 auto 40px' }}>Transfer files instantly between laptop and iPhone. Secure, fast, and fully compatible with all mobile browsers.</p>
+            <p style={{ color: '#888888', fontSize: '18px', maxWidth: '650px', margin: '0 auto 40px' }}>Transfer files, folders, or anything instantly. Scan the QR code on your phone to download everything at once.</p>
 
             {errorMsg && (
-              <div style={{ maxWidth: '600px', margin: '0 auto 24px', background: '#FFEEEE', border: '1px solid #C8001A', color: '#C8001A', padding: '12px 16px', borderRadius: '6px', fontSize: '14px', fontWeight: 700 }}>
+              <div style={{ maxWidth: '640px', margin: '0 auto 24px', background: '#FFEEEE', border: '1px solid #C8001A', color: '#C8001A', padding: '12px 16px', borderRadius: '6px', fontSize: '14px', fontWeight: 700 }}>
                 {errorMsg}
               </div>
             )}
 
+            {/* ── IDLE ── */}
             {role === 'idle' && (
-              <div style={{ maxWidth: '600px', margin: '0 auto', background: '#FFFFFF', padding: '40px 32px', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', textAlign: 'center' }}>
-                <div style={{ fontSize: '40px', marginBottom: '16px' }}>📁</div>
-                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', color: '#000000', marginBottom: '8px' }}>Send Files Instantly</h3>
-                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Supports documents, videos, and media — no size limit</p>
+              <div
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                style={{
+                  maxWidth: '640px', margin: '0 auto', background: '#FFFFFF',
+                  padding: '48px 32px', borderRadius: '12px',
+                  boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
+                  border: isDragging ? '2px dashed #C8001A' : '2px dashed transparent',
+                  transition: 'border 0.2s',
+                  textAlign: 'center',
+                }}
+              >
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>📂</div>
+                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', color: '#000000', marginBottom: '8px' }}>Drop files or a folder here</h3>
+                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '32px' }}>Or use the buttons below — select multiple files or an entire folder</p>
 
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  style={{ display: 'none' }}
-                  onChange={handleFileSelect}
-                />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  style={{ background: '#C8001A', color: '#FFFFFF', border: 'none', padding: '16px 32px', borderRadius: '6px', fontSize: '16px', fontWeight: 700, cursor: 'pointer' }}
-                >
-                  Select File to Share
-                </button>
+                {/* Hidden inputs */}
+                <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }} onChange={handleFileInput} />
+                {/* @ts-expect-error webkitdirectory is a non-standard attribute */}
+                <input ref={folderInputRef} type="file" webkitdirectory="" style={{ display: 'none' }} onChange={handleFileInput} />
+
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{ background: '#C8001A', color: '#FFFFFF', border: 'none', padding: '14px 28px', borderRadius: '6px', fontSize: '15px', fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    📄 Select Files
+                  </button>
+                  <button
+                    onClick={() => folderInputRef.current?.click()}
+                    style={{ background: 'transparent', color: '#000000', border: '2px solid #000000', padding: '14px 28px', borderRadius: '6px', fontSize: '15px', fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    📁 Select Folder
+                  </button>
+                </div>
               </div>
             )}
 
+            {/* ── UPLOADING ── */}
             {role === 'uploading' && (
-              <div style={{ maxWidth: '600px', margin: '0 auto', background: '#FFFFFF', padding: '50px 32px', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', textAlign: 'center', color: '#000000' }}>
-                <div style={{ width: '48px', height: '48px', border: '5px solid rgba(200,0,26,0.2)', borderRadius: '50%', borderTopColor: '#C8001A', animation: 'spin 1s ease-in-out infinite', margin: '0 auto 20px' }} />
-                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', marginBottom: '8px' }}>Uploading File...</h3>
-                <p style={{ color: '#888888', fontSize: '14px' }}>Generating your mobile QR code</p>
+              <div style={{ maxWidth: '640px', margin: '0 auto', background: '#FFFFFF', padding: '32px', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', textAlign: 'left', color: '#000000' }}>
+                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', marginBottom: '4px', textAlign: 'center' }}>
+                  Uploading {uploadedCount} / {totalFiles} files...
+                </h3>
+                <p style={{ color: '#888888', fontSize: '13px', textAlign: 'center', marginBottom: '20px' }}>Generating shared QR code</p>
+
+                {/* Progress bar */}
+                <div style={{ background: '#F0F0F0', borderRadius: '99px', height: '8px', marginBottom: '24px', overflow: 'hidden' }}>
+                  <div style={{ background: '#C8001A', height: '100%', width: `${progressPct}%`, borderRadius: '99px', transition: 'width 0.4s ease' }} />
+                </div>
+
+                {/* File list */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '260px', overflowY: 'auto' }}>
+                  {trackedFiles.map((tf, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: '#F9F9F9', borderRadius: '6px', fontSize: '13px' }}>
+                      <span style={{ flexShrink: 0 }}>{statusIcon(tf.status)}</span>
+                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tf.file.name}</span>
+                      <span style={{ color: '#888', flexShrink: 0 }}>{formatSize(tf.file.size)}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
+            {/* ── SENDER / DONE ── */}
             {role === 'sender' && (
-              <div style={{ background: '#FFFFFF', borderRadius: '8px', maxWidth: '650px', margin: '0 auto', padding: '32px', textAlign: 'center', color: '#000000', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}>
-                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', marginBottom: '8px' }}>Sharing: {file?.name}</h3>
-                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Scan this QR code with your phone camera to download instantly</p>
+              <div style={{ background: '#FFFFFF', borderRadius: '12px', maxWidth: '640px', margin: '0 auto', padding: '32px', textAlign: 'center', color: '#000000', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}>
+                <div style={{ fontSize: '32px', marginBottom: '8px' }}>✅</div>
+                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '22px', marginBottom: '4px' }}>
+                  {trackedFiles.length} file{trackedFiles.length !== 1 ? 's' : ''} ready to share
+                </h3>
+                <p style={{ color: '#888888', fontSize: '14px', marginBottom: '24px' }}>Scan the QR code with your phone camera to download everything</p>
 
                 {qrImageUrl && (
-                  <div style={{ background: '#F5F5F5', padding: '16px', display: 'inline-block', borderRadius: '8px', marginBottom: '24px' }}>
+                  <div style={{ background: '#F5F5F5', padding: '16px', display: 'inline-block', borderRadius: '8px', marginBottom: '20px' }}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={qrImageUrl} alt="Scan to Download" style={{ width: '220px', height: '220px', display: 'block' }} />
                   </div>
                 )}
 
-                <div style={{ margin: '16px 0 24px' }}>
+                <div style={{ margin: '0 0 20px' }}>
                   <a href={shareLink} target="_blank" rel="noopener noreferrer" style={{ color: '#C8001A', fontSize: '14px', wordBreak: 'break-all', textDecoration: 'underline' }}>
                     {shareLink}
                   </a>
                 </div>
 
+                {/* Summary of files */}
+                <div style={{ textAlign: 'left', background: '#F9F9F9', borderRadius: '8px', padding: '12px 16px', marginBottom: '24px', maxHeight: '180px', overflowY: 'auto' }}>
+                  {trackedFiles.map((tf, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', padding: '4px 0', borderBottom: i < trackedFiles.length - 1 ? '1px solid #ECECEC' : 'none' }}>
+                      <span>{statusIcon(tf.status)}</span>
+                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tf.file.name}</span>
+                      <span style={{ color: '#888' }}>{formatSize(tf.file.size)}</span>
+                    </div>
+                  ))}
+                </div>
+
                 <button onClick={resetApp} style={{ background: 'transparent', border: '2px solid #000000', color: '#000000', padding: '12px 24px', borderRadius: '6px', fontWeight: 700, cursor: 'pointer' }}>
-                  Share Another File
+                  Share More Files
                 </button>
               </div>
             )}
